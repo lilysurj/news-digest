@@ -296,6 +296,68 @@ def render_markdown(
 # Optional email delivery (off by default — passes --email to enable)
 # ---------------------------------------------------------------------------
 
+_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>News Digest</title>
+<style>
+  body {{ margin: 0; padding: 0; background: #f6f8fa;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                      "Helvetica Neue", Arial, sans-serif;
+         color: #1f2328; line-height: 1.55; }}
+  .wrap {{ padding: 28px 14px; }}
+  .card {{ max-width: 640px; margin: 0 auto; background: #ffffff;
+          border: 1px solid #d0d7de; border-radius: 10px; }}
+  .inner {{ padding: 28px 34px; }}
+  h1 {{ font-size: 22px; margin: 0 0 6px 0; color: #0d1117;
+       letter-spacing: -0.01em; }}
+  h1 + p em {{ color: #6e7681; font-size: 13px; font-style: normal; }}
+  h2 {{ font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+       margin: 32px 0 12px 0; padding-bottom: 8px;
+       border-bottom: 2px solid #0d1117; color: #0d1117; }}
+  ol {{ padding-left: 22px; margin: 12px 0 0 0; }}
+  li {{ margin-bottom: 14px; padding-left: 4px; }}
+  li strong {{ color: #0d1117; font-weight: 600; }}
+  a {{ color: #0969da; text-decoration: none; }}
+  a:hover {{ text-decoration: underline; }}
+  .synthesis {{ background: #f6f8fa; border-left: 3px solid #0969da;
+               padding: 12px 14px; margin: 4px 0 14px 0; border-radius: 4px;
+               font-size: 14.5px; color: #24292f; }}
+  .syn-label {{ display: block; font-size: 11px; letter-spacing: 0.1em;
+               text-transform: uppercase; color: #6e7681; margin-bottom: 4px;
+               font-weight: 600; }}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="inner">
+{body}
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+
+def _render_html(digest_md: str) -> str:
+    """Render the digest as a styled HTML email body."""
+    import markdown as _md
+
+    body = _md.markdown(digest_md, extensions=["extra", "sane_lists"])
+    body = re.sub(
+        r"<p><strong>Synthesis:</strong>\s*(.*?)</p>",
+        r'<div class="synthesis">'
+        r'<span class="syn-label">Synthesis</span>\1'
+        r"</div>",
+        body,
+        flags=re.DOTALL,
+    )
+    return _HTML_TEMPLATE.format(body=body)
+
+
 def send_email(digest_md: str, subject: str) -> None:
     """Send the digest via SMTP. All credentials read from env vars so nothing
     sensitive lives in source.
@@ -329,6 +391,7 @@ def send_email(digest_md: str, subject: str) -> None:
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
     msg.set_content(digest_md)
+    msg.add_alternative(_render_html(digest_md), subtype="html")
 
     with smtplib.SMTP(host, port) as s:
         s.starttls()
