@@ -50,16 +50,16 @@ FEEDS: dict[str, dict[str, str]] = {
         "China Digital Times":  "https://chinadigitaltimes.net/feed/",
     },
     "General Current Events": {
-        "NPR News":          "https://feeds.npr.org/1001/rss.xml",
-        "BBC News":          "http://feeds.bbci.co.uk/news/rss.xml",
+        "NPR World":         "https://feeds.npr.org/1004/rss.xml",
+        "BBC World":         "http://feeds.bbci.co.uk/news/world/rss.xml",
         "WSJ World":         "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
-        "NYT Home":          "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+        "NYT World":         "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
     },
 }
 
 REQUEST_TIMEOUT = 15        # seconds per feed
 WINDOW_HOURS = 24
-ITEMS_PER_CATEGORY = 8
+ITEMS_PER_CATEGORY = 5
 USER_AGENT = "news-digest/1.0 (+rss aggregator)"
 
 log = logging.getLogger("digest")
@@ -377,19 +377,6 @@ def send_email(digest_md: str, subject: str) -> None:
     if not sender or not recipients:
         log.warning("SMTP_FROM / SMTP_TO not configured; skipping email.")
         return
-
-    # Diagnostic: log lengths + last char of each value so we can spot trailing
-    # whitespace, wrong-length pastes, or off-by-one typos without leaking the
-    # secret itself (GitHub auto-redacts known secret values in logs anyway).
-    def _suffix(s: str) -> str:
-        return repr(s[-1]) if s else "''"
-    log.warning(
-        "SMTP DIAG: host=%r port=%d user_len=%d user_last=%s "
-        "pass_len=%d pass_last=%s sender_len=%d to_count=%d",
-        host, port, len(user), _suffix(user),
-        len(password), _suffix(password),
-        len(sender), len(recipients),
-    )
 
     msg = EmailMessage()
     msg["Subject"] = subject
