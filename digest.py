@@ -34,17 +34,19 @@ import requests
 
 FEEDS: dict[str, dict[str, str]] = {
     "Cybersecurity": {
-        "Krebs on Security": "https://krebsonsecurity.com/feed/",
-        "The Record":        "https://therecord.media/feed",
-        "Bleeping Computer": "https://www.bleepingcomputer.com/feed/",
-        "The Hacker News":   "https://feeds.feedburner.com/TheHackersNews",
-        "CISA Advisories":   "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+        "Krebs on Security":      "https://krebsonsecurity.com/feed/",
+        "The Record":             "https://therecord.media/feed",
+        "Bleeping Computer":      "https://www.bleepingcomputer.com/feed/",
+        "The Hacker News":        "https://feeds.feedburner.com/TheHackersNews",
+        "CISA Advisories":        "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+        "Schneier on Security":   "https://www.schneier.com/feed/atom/",
     },
     "Foreign Policy": {
         "CFR":               "https://www.cfr.org/rss.xml",
         "War on the Rocks":  "https://warontherocks.com/feed/",
         "Lawfare":           "https://www.lawfaremedia.org/feed.xml",
         "Foreign Policy":    "https://foreignpolicy.com/feed/",
+        "CSET":              "https://cset.georgetown.edu/feed/",
     },
     "China & US-China Policy": {
         "The Diplomat":         "https://thediplomat.com/feed/",
@@ -63,6 +65,61 @@ WINDOW_HOURS = 24
 ITEMS_PER_CATEGORY = 5
 DISPLAY_TZ = ZoneInfo("America/Los_Angeles")  # render timestamps in PT
 USER_AGENT = "news-digest/1.0 (+rss aggregator)"
+
+# ---------------------------------------------------------------------------
+# Ranking config — tune freely. Matched case-insensitively against title +
+# summary, with \b word boundaries (so "AI" won't match inside "said", and
+# "zero-day" matches around the hyphen). Each keyword counts at most once
+# per item, so a headline that says "ransomware" three times doesn't drown
+# out everything else.
+# ---------------------------------------------------------------------------
+
+KEYWORD_WEIGHTS: dict[int, list[str]] = {
+    # High (3): specific, high-signal, rarely false-positive
+    3: [
+        "ransomware", "zero-day", "CVE", "breach", "exploit", "data leak",
+        "supply chain", "critical infrastructure", "espionage", "nation-state",
+        "prompt injection", "model poisoning", "data poisoning",
+        "AI-powered attack", "AI vulnerability", "LLM security",
+    ],
+    # Medium (2): relevant but broader
+    2: [
+        "vulnerability", "malware", "phishing", "APT", "CISA", "patch",
+        "sanctions", "export controls", "semiconductors", "Taiwan",
+        "AI security", "jailbreak", "deepfake", "surveillance",
+    ],
+    # Low (1): dual-use / context terms (may pull some noise)
+    1: [
+        "China", "Russia", "Iran", "North Korea", "regulation", "data privacy",
+        "AI", "adversarial", "agentic", "autonomous agent",
+    ],
+}
+
+# Domain tags for the cross-domain bonus. An item matching at least one cyber
+# AND at least one geo keyword earns CROSS_DOMAIN_BONUS once, so a "Chinese
+# APT exploits zero-day in Taiwan" outranks a pure-cyber or pure-geo story
+# at equal raw score. These are subsets of the boost lists above; a keyword
+# can have high weight but no domain tag (e.g. "prompt injection" is
+# cyber-only and won't boost a story unless it also hits a geo term).
+CYBER_DOMAIN: set[str] = {
+    "ransomware", "zero-day", "cve", "breach", "exploit", "data leak",
+    "supply chain", "critical infrastructure", "prompt injection",
+    "model poisoning", "data poisoning", "ai-powered attack",
+    "ai vulnerability", "llm security", "vulnerability", "malware",
+    "phishing", "apt", "cisa", "patch", "ai security", "jailbreak",
+    "deepfake", "adversarial",
+}
+GEO_DOMAIN: set[str] = {
+    "espionage", "nation-state", "sanctions", "export controls",
+    "semiconductors", "taiwan", "china", "russia", "iran", "north korea",
+}
+CROSS_DOMAIN_BONUS = 2
+
+# Drop any item whose title contains a muted term (whole-word, case-insensitive).
+# Applied before scoring. Edit freely.
+MUTE_KEYWORDS: list[str] = [
+    # "opinion", "sponsored", "horoscope",  # examples — uncomment/edit as needed
+]
 
 log = logging.getLogger("digest")
 
@@ -183,12 +240,63 @@ def dedupe(items: list[Item]) -> list[Item]:
     return out
 
 
+def _word_match(needle: str, haystack: str) -> bool:
+    """Whole-word, case-insensitive substring match. Inputs already lowercased."""
+    return re.search(r"\b" + re.escape(needle) + r"\b", haystack) is not None
+
+
+def mute_filter(items: list[Item]) -> list[Item]:
+    """Drop items whose title contains a MUTE_KEYWORDS term."""
+    if not MUTE_KEYWORDS:
+        return items
+    muted = [k.lower() for k in MUTE_KEYWORDS]
+    out: list[Item] = []
+    for item in items:
+        title_lower = item.title.lower()
+        if any(_word_match(m, title_lower) for m in muted):
+            continue
+        out.append(item)
+    return out
+
+
+def score_item(item: Item) -> int:
+    """Sum tier weights for boost keywords in title+summary, plus cross-domain
+    bonus when both a cyber- and a geo-tagged keyword appear in the same item.
+    Each keyword counts at most once.
+    """
+    text = (item.title + " " + item.summary).lower()
+    score = 0
+    matched_cyber = False
+    matched_geo = False
+    for weight, keywords in KEYWORD_WEIGHTS.items():
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if not _word_match(kw_lower, text):
+                continue
+            score += weight
+            if kw_lower in CYBER_DOMAIN:
+                matched_cyber = True
+            if kw_lower in GEO_DOMAIN:
+                matched_geo = True
+    if matched_cyber and matched_geo:
+        score += CROSS_DOMAIN_BONUS
+    return score
+
+
 def group_and_rank(items: list[Item], per_category: int) -> dict[str, list[Item]]:
+    """Group by category, then within each category sort by (score, published)
+    descending. Zero-score items still appear if there's room; boosted items
+    take the top slots.
+    """
     grouped: dict[str, list[Item]] = {cat: [] for cat in FEEDS}
     for item in items:
         grouped.setdefault(item.category, []).append(item)
     for cat in grouped:
-        grouped[cat] = sorted(grouped[cat], key=lambda x: x.published, reverse=True)[:per_category]
+        grouped[cat] = sorted(
+            grouped[cat],
+            key=lambda x: (score_item(x), x.published),
+            reverse=True,
+        )[:per_category]
     return grouped
 
 
@@ -420,7 +528,7 @@ def main(argv: list[str] | None = None) -> int:
     log.info("fetching %d feeds...", sum(len(v) for v in FEEDS.values()))
     items = fetch_all(FEEDS)
     log.info("fetched %d items total", len(items))
-    items = dedupe(filter_recent(items, WINDOW_HOURS))
+    items = dedupe(mute_filter(filter_recent(items, WINDOW_HOURS)))
     grouped = group_and_rank(items, ITEMS_PER_CATEGORY)
 
     md = render_markdown(now, grouped)

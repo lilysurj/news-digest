@@ -1,10 +1,27 @@
 # News Digest
 
 A small Python script that pulls public RSS feeds across **cybersecurity**,
-**foreign policy**, and **general current events**, filters to the last 24
-hours, and writes a dated Markdown digest (also printed to the console).
+**foreign policy**, **China & US-China policy**, and **general current
+events**, filters to the last 24 hours, ranks items by tunable keyword
+boosts, and writes a dated Markdown digest (also printed to the console).
 
-No logins, no paywall scraping, no stored credentials.
+No logins, no paywall scraping, no stored credentials, no LLM API calls.
+
+## Ranking
+
+Within each category, items are sorted by a keyword score (then publish
+time as a tiebreaker), so high-signal stories take the top slots. All
+tunables live in a config block at the top of `digest.py`:
+
+- `KEYWORD_WEIGHTS` — tiered boost lists (3 / 2 / 1) matched whole-word,
+  case-insensitive, against title + summary.
+- `CYBER_DOMAIN` / `GEO_DOMAIN` + `CROSS_DOMAIN_BONUS` — items that hit
+  both a cyber and a geo keyword get an extra bump, so a "Chinese APT
+  exploits zero-day in Taiwan" outranks a pure-cyber story.
+- `MUTE_KEYWORDS` — drop any item whose title contains a muted term.
+  Starts empty.
+
+Edit these lists freely; no other code change needed.
 
 ## Install
 
