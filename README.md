@@ -19,12 +19,9 @@ pip install -r requirements.txt
 ```sh
 python digest.py                       # writes digest-YYYY-MM-DD.md in cwd
 python digest.py --output-dir digests  # write into ./digests/
-python digest.py --ai                  # use Anthropic for per-category synthesis
+python digest.py --html-preview        # also write a styled .html preview
 python digest.py --quiet               # suppress info logs
 ```
-
-The `--ai` flag is silent-fallback: if `ANTHROPIC_API_KEY` is unset or the
-`anthropic` package is missing, it uses the heuristic synthesis instead.
 
 ### Optional email delivery
 
@@ -49,22 +46,12 @@ Runs daily at 07:00 local time. Edit your crontab with `crontab -e` and add:
 0 7 * * * cd /Users/lily/Documents/news-digest && /Users/lily/Documents/news-digest/.venv/bin/python digest.py --output-dir digests >> digest.log 2>&1
 ```
 
-If you want the AI synthesis, put your key in the crontab's environment:
-
-```cron
-ANTHROPIC_API_KEY=sk-ant-...
-0 7 * * * cd /Users/lily/Documents/news-digest && /Users/lily/Documents/news-digest/.venv/bin/python digest.py --ai --output-dir digests >> digest.log 2>&1
-```
-
 Note: on macOS, cron may need Full Disk Access (System Settings → Privacy &
 Security → Full Disk Access → add `/usr/sbin/cron`) to write into `Documents`.
 
 ### Option B: GitHub Actions
 
-Commit this repo to GitHub. The workflow at `.github/workflows/digest.yml`
-runs daily at 12:00 UTC, commits the new `digest-YYYY-MM-DD.md` back to the
-repo, and uploads it as a build artifact.
-
-For AI synthesis, add `ANTHROPIC_API_KEY` under **Settings → Secrets and
-variables → Actions → New repository secret**. The workflow already passes
-it through; without the secret it falls back to the heuristic version.
+The workflow at `.github/workflows/digest.yml` runs daily at 12:00 UTC,
+commits the new `digest-YYYY-MM-DD.md` back to the repo, and uploads it as a
+build artifact. To also receive the digest by email, add the `SMTP_*` secrets
+described above under **Settings → Secrets and variables → Actions**.

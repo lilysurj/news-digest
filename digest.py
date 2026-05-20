@@ -2,9 +2,8 @@
 """Daily news digest: cybersecurity, foreign policy, general current events.
 
 Fetches public RSS feeds, filters to the last 24 hours, groups by category,
-and renders a Markdown digest both to stdout and to a dated file. An optional
-AI synthesis layer (Anthropic) is available behind a CLI flag; without an
-API key the script falls back to a heuristic summary, silently.
+and renders a Markdown digest both to stdout and to a dated file. Optionally
+delivers a styled HTML version by email.
 
 No logins, no paywall scraping, no stored credentials.
 """
@@ -17,7 +16,6 @@ import os
 import re
 import smtplib
 import sys
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -49,8 +47,6 @@ FEEDS: dict[str, dict[str, str]] = {
     "General Current Events": {
         "NPR News":          "https://feeds.npr.org/1001/rss.xml",
         "BBC News":          "http://feeds.bbci.co.uk/news/rss.xml",
-        "AP Top News":       "https://feeds.apnews.com/rss/apf-topnews",
-        "PBS NewsHour":      "https://www.pbs.org/newshour/feeds/rss/headlines",
         "WSJ World":         "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
         "NYT Home":          "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
     },
@@ -59,20 +55,7 @@ FEEDS: dict[str, dict[str, str]] = {
 REQUEST_TIMEOUT = 15        # seconds per feed
 WINDOW_HOURS = 24
 ITEMS_PER_CATEGORY = 8
-DEFAULT_MODEL = "claude-opus-4-7"
 USER_AGENT = "news-digest/1.0 (+rss aggregator)"
-
-_STOPWORDS = {
-    "about", "after", "again", "against", "also", "among", "amid", "and", "another",
-    "are", "around", "because", "been", "before", "being", "between", "but", "could",
-    "does", "doing", "done", "for", "from", "get", "got", "have", "here", "how",
-    "into", "its", "just", "like", "make", "many", "more", "most", "much", "new",
-    "not", "off", "old", "one", "onto", "other", "our", "over", "said", "says",
-    "since", "some", "still", "such", "take", "tell", "than", "that", "the", "their",
-    "them", "then", "there", "these", "they", "this", "those", "through", "time",
-    "today", "told", "two", "under", "upon", "very", "was", "were", "what", "when",
-    "where", "which", "while", "who", "why", "will", "with", "would", "you", "your",
-}
 
 log = logging.getLogger("digest")
 
@@ -203,70 +186,12 @@ def group_and_rank(items: list[Item], per_category: int) -> dict[str, list[Item]
 
 
 # ---------------------------------------------------------------------------
-# Synthesis
-# ---------------------------------------------------------------------------
-
-def heuristic_synthesis(category: str, items: list[Item]) -> str:
-    if not items:
-        return f"_No {category.lower()} headlines in the last {WINDOW_HOURS} hours._"
-    words: list[str] = []
-    for item in items:
-        for w in re.findall(r"[A-Za-z][A-Za-z'\-]{3,}", item.title.lower()):
-            if w not in _STOPWORDS:
-                words.append(w)
-    common = [w for w, _ in Counter(words).most_common(6)]
-    sources = sorted({i.source for i in items})
-    if not common:
-        return f"{len(items)} headlines across {', '.join(sources)}."
-    return (
-        f"{len(items)} headlines across {', '.join(sources)}. "
-        f"Recurring terms: _{', '.join(common[:4])}_. "
-        "Skim the items below for the full picture."
-    )
-
-
-def ai_synthesis(category: str, items: list[Item], model: str) -> str | None:
-    """Anthropic-powered synthesis. Returns None if unavailable so the caller
-    can fall back to heuristic_synthesis()."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key or not items:
-        return None
-    try:
-        from anthropic import Anthropic
-    except ImportError:
-        log.info("anthropic SDK not installed; falling back to heuristic.")
-        return None
-
-    headlines = "\n".join(f"- {i.title} ({i.source})" for i in items)
-    prompt = (
-        f"Below are today's top {category} headlines. In 2-3 sentences, "
-        "describe the throughline — the dominant themes connecting these stories. "
-        "No preamble, no bullet list, no headers — just the synthesis paragraph.\n\n"
-        f"{headlines}"
-    )
-    try:
-        client = Anthropic(api_key=api_key)
-        resp = client.messages.create(
-            model=model,
-            max_tokens=300,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        chunks = [getattr(b, "text", "") for b in resp.content]
-        text = " ".join(c for c in chunks if c).strip()
-        return text or None
-    except Exception as exc:
-        log.warning("AI synthesis failed for %s: %s", category, exc)
-        return None
-
-
-# ---------------------------------------------------------------------------
 # Render
 # ---------------------------------------------------------------------------
 
 def render_markdown(
     when: datetime,
     grouped: dict[str, list[Item]],
-    syntheses: dict[str, str],
 ) -> str:
     lines: list[str] = []
     lines.append(f"# News Digest — {when:%Y-%m-%d}")
@@ -276,8 +201,6 @@ def render_markdown(
     for category in FEEDS:
         items = grouped.get(category, [])
         lines.append(f"## {category}")
-        lines.append("")
-        lines.append(f"**Synthesis:** {syntheses.get(category, '')}")
         lines.append("")
         if not items:
             lines.append("_No items._")
@@ -321,12 +244,6 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   li strong {{ color: #0d1117; font-weight: 600; }}
   a {{ color: #0969da; text-decoration: none; }}
   a:hover {{ text-decoration: underline; }}
-  .synthesis {{ background: #f6f8fa; border-left: 3px solid #0969da;
-               padding: 12px 14px; margin: 4px 0 14px 0; border-radius: 4px;
-               font-size: 14.5px; color: #24292f; }}
-  .syn-label {{ display: block; font-size: 11px; letter-spacing: 0.1em;
-               text-transform: uppercase; color: #6e7681; margin-bottom: 4px;
-               font-weight: 600; }}
 </style>
 </head>
 <body>
@@ -347,14 +264,6 @@ def _render_html(digest_md: str) -> str:
     import markdown as _md
 
     body = _md.markdown(digest_md, extensions=["extra", "sane_lists"])
-    body = re.sub(
-        r"<p><strong>Synthesis:</strong>\s*(.*?)</p>",
-        r'<div class="synthesis">'
-        r'<span class="syn-label">Synthesis</span>\1'
-        r"</div>",
-        body,
-        flags=re.DOTALL,
-    )
     return _HTML_TEMPLATE.format(body=body)
 
 
@@ -409,11 +318,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Daily news digest.")
     parser.add_argument("--output-dir", default=".",
                         help="Directory for the digest .md file (default: cwd).")
-    parser.add_argument("--ai", action="store_true",
-                        help="Use Anthropic API for per-category synthesis. "
-                             "Requires ANTHROPIC_API_KEY; falls back silently if unset.")
-    parser.add_argument("--model", default=DEFAULT_MODEL,
-                        help=f"Anthropic model id (default: {DEFAULT_MODEL}).")
     parser.add_argument("--email", action="store_true",
                         help="Also send via SMTP (reads SMTP_* env vars).")
     parser.add_argument("--html-preview", action="store_true",
@@ -434,16 +338,7 @@ def main(argv: list[str] | None = None) -> int:
     items = dedupe(filter_recent(items, WINDOW_HOURS))
     grouped = group_and_rank(items, ITEMS_PER_CATEGORY)
 
-    syntheses: dict[str, str] = {}
-    for category, cat_items in grouped.items():
-        text: str | None = None
-        if args.ai:
-            text = ai_synthesis(category, cat_items, args.model)
-        if not text:
-            text = heuristic_synthesis(category, cat_items)
-        syntheses[category] = text
-
-    md = render_markdown(now, grouped, syntheses)
+    md = render_markdown(now, grouped)
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
