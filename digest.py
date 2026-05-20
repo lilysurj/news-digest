@@ -385,7 +385,7 @@ def send_email(digest_md: str, subject: str) -> None:
     msg.set_content(digest_md)
     msg.add_alternative(_render_html(digest_md), subtype="html")
 
-    with smtplib.SMTP(host, port) as s:
+    with smtplib.SMTP(host, port, timeout=30) as s:
         s.starttls()
         if user:
             s.login(user, password)
