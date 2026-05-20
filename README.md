@@ -40,18 +40,16 @@ python digest.py --quiet               # suppress info logs
 
 ### Option A: macOS / Linux cron
 
-Runs daily at 07:00 local time. Edit your crontab with `crontab -e` and add:
-
-```cron
-0 7 * * * cd /Users/lily/Documents/news-digest && /Users/lily/Documents/news-digest/.venv/bin/python digest.py --output-dir digests >> digest.log 2>&1
-```
-
-Note: on macOS, cron may need Full Disk Access (System Settings → Privacy &
-Security → Full Disk Access → add `/usr/sbin/cron`) to write into `Documents`.
+Runs daily at 07:00 local time. Edit your crontab with `crontab -e` and add a
+line that `cd`s into your local checkout and runs `digest.py` with the venv's
+Python, redirecting output to a log file. On macOS, cron may need Full Disk
+Access (System Settings → Privacy & Security → Full Disk Access → add
+`/usr/sbin/cron`) to write into protected directories like `Documents`.
 
 ### Option B: GitHub Actions
 
-The workflow at `.github/workflows/digest.yml` runs daily at 12:00 UTC,
-commits the new `digest-YYYY-MM-DD.md` back to the repo, and uploads it as a
-build artifact. To also receive the digest by email, add the `SMTP_*` secrets
-described above under **Settings → Secrets and variables → Actions**.
+The workflow at `.github/workflows/digest.yml` runs daily at 11:00 UTC
+(7am Eastern during DST, 6am EST after DST ends), commits the new
+`digest-YYYY-MM-DD.md` back to the repo, and uploads it as a build artifact.
+To also receive the digest by email, add the `SMTP_*` secrets described above
+under **Settings → Secrets and variables → Actions**.
