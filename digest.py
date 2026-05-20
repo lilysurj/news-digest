@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from html import unescape
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import feedparser
 import requests
@@ -60,6 +61,7 @@ FEEDS: dict[str, dict[str, str]] = {
 REQUEST_TIMEOUT = 15        # seconds per feed
 WINDOW_HOURS = 24
 ITEMS_PER_CATEGORY = 5
+DISPLAY_TZ = ZoneInfo("America/Los_Angeles")  # render timestamps in PT
 USER_AGENT = "news-digest/1.0 (+rss aggregator)"
 
 log = logging.getLogger("digest")
@@ -246,7 +248,7 @@ def render_markdown(
     lines: list[str] = []
     lines.append(f"# News Digest — {when:%Y-%m-%d}")
     lines.append("")
-    lines.append(f"_Generated {when:%Y-%m-%d %H:%M UTC}. Window: last {WINDOW_HOURS} hours._")
+    lines.append(f"_Generated {when:%Y-%m-%d %H:%M %Z}. Window: last {WINDOW_HOURS} hours._")
     lines.append("")
     for category in FEEDS:
         items = grouped.get(category, [])
@@ -414,7 +416,7 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(DISPLAY_TZ)
     log.info("fetching %d feeds...", sum(len(v) for v in FEEDS.values()))
     items = fetch_all(FEEDS)
     log.info("fetched %d items total", len(items))

@@ -2,7 +2,7 @@ name: Daily news digest
 
 on:
   schedule:
-    - cron: "0 12 * * *"   # 12:00 UTC daily
+    - cron: "0 11 * * *"   # 11:00 UTC = 7am EDT (6am EST after DST ends)
   workflow_dispatch:        # allow manual runs from the Actions tab
 
 permissions:
