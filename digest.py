@@ -16,6 +16,7 @@ import os
 import re
 import smtplib
 import sys
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -186,6 +187,51 @@ def group_and_rank(items: list[Item], per_category: int) -> dict[str, list[Item]
 
 
 # ---------------------------------------------------------------------------
+# Topics — recurring proper-noun-ish words across headlines
+# ---------------------------------------------------------------------------
+
+_TOPIC_FILLER = {
+    # Function words that sometimes start headlines (and so get capitalized)
+    "the", "a", "an", "this", "that", "these", "those",
+    "after", "before", "amid", "while", "when", "where", "what", "how", "why",
+    "with", "into", "from", "about", "against", "across",
+    "new", "first", "last", "next", "more", "most", "much",
+    "is", "was", "were", "are", "be", "been", "have", "has", "had",
+    "but", "and", "or", "for", "to", "in", "on", "at", "of", "by",
+    # Generic news verbs that occasionally start a sentence in a title
+    "report", "reports", "reported", "says", "said", "saying",
+    "tells", "told", "warns", "warned",
+    "claims", "claimed", "denies", "denied",
+    "calls", "called", "urges", "urged",
+    "announces", "announced", "expected", "according",
+    "could", "would", "should", "may", "might",
+    "today", "yesterday",
+}
+
+
+def extract_topics(items: list[Item], max_topics: int = 5) -> list[str]:
+    """Return recurring topic words across the given headlines.
+
+    Only considers words capitalized in the original headline (a proper-noun
+    bias — catches Citrix, Russia, Treasury, etc., and ignores "according",
+    "says", "report"). Word must be ≥4 chars, not in the filler list, and
+    appear in ≥2 headlines.
+    """
+    if not items:
+        return []
+    counts: Counter[str] = Counter()
+    display: dict[str, str] = {}
+    for item in items:
+        for word in re.findall(r"\b[A-Z][A-Za-z]{3,}\b", item.title):
+            key = word.lower()
+            if key in _TOPIC_FILLER:
+                continue
+            counts[key] += 1
+            display.setdefault(key, word)
+    return [display[k] for k, n in counts.most_common(max_topics) if n >= 2]
+
+
+# ---------------------------------------------------------------------------
 # Render
 # ---------------------------------------------------------------------------
 
@@ -202,6 +248,10 @@ def render_markdown(
         items = grouped.get(category, [])
         lines.append(f"## {category}")
         lines.append("")
+        topics = extract_topics(items)
+        if topics:
+            lines.append(f"**Topics:** {' · '.join(topics)}")
+            lines.append("")
         if not items:
             lines.append("_No items._")
             lines.append("")
@@ -244,6 +294,16 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   li strong {{ color: #0d1117; font-weight: 600; }}
   a {{ color: #0969da; text-decoration: none; }}
   a:hover {{ text-decoration: underline; }}
+  .topics {{ margin: 4px 0 18px 0; }}
+  .topics-label {{ display: inline-block; font-size: 11px;
+                   letter-spacing: 0.1em; text-transform: uppercase;
+                   color: #6e7681; font-weight: 600; margin-right: 6px;
+                   vertical-align: middle; }}
+  .topic-tag {{ display: inline-block; padding: 2px 10px;
+                background: #ddf4ff; border: 1px solid #b6e3ff;
+                border-radius: 999px; font-size: 12px; color: #0969da;
+                font-weight: 500; margin-right: 4px; margin-bottom: 4px;
+                vertical-align: middle; }}
 </style>
 </head>
 <body>
@@ -264,6 +324,25 @@ def _render_html(digest_md: str) -> str:
     import markdown as _md
 
     body = _md.markdown(digest_md, extensions=["extra", "sane_lists"])
+
+    def _topics_to_pills(match: re.Match[str]) -> str:
+        topics = [t.strip() for t in match.group(1).split("·") if t.strip()]
+        if not topics:
+            return ""
+        tags = "".join(f'<span class="topic-tag">{t}</span>' for t in topics)
+        return (
+            '<div class="topics">'
+            '<span class="topics-label">Topics</span>'
+            f"{tags}"
+            "</div>"
+        )
+
+    body = re.sub(
+        r"<p><strong>Topics:</strong>\s*(.*?)</p>",
+        _topics_to_pills,
+        body,
+        flags=re.DOTALL,
+    )
     return _HTML_TEMPLATE.format(body=body)
 
 
