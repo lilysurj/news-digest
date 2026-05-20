@@ -416,6 +416,9 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"Anthropic model id (default: {DEFAULT_MODEL}).")
     parser.add_argument("--email", action="store_true",
                         help="Also send via SMTP (reads SMTP_* env vars).")
+    parser.add_argument("--html-preview", action="store_true",
+                        help="Also write a styled HTML version next to the .md, "
+                             "to preview how the email body will render.")
     parser.add_argument("--quiet", action="store_true", help="Suppress info logs.")
     args = parser.parse_args(argv)
 
@@ -447,6 +450,11 @@ def main(argv: list[str] | None = None) -> int:
     out_path = out_dir / f"digest-{now:%Y-%m-%d}.md"
     out_path.write_text(md, encoding="utf-8")
     log.info("wrote %s", out_path)
+
+    if args.html_preview:
+        html_path = out_dir / f"digest-{now:%Y-%m-%d}.html"
+        html_path.write_text(_render_html(md), encoding="utf-8")
+        log.info("wrote %s", html_path)
 
     print(md)
 
