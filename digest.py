@@ -45,6 +45,10 @@ FEEDS: dict[str, dict[str, str]] = {
         "Lawfare":           "https://www.lawfaremedia.org/feed.xml",
         "Foreign Policy":    "https://foreignpolicy.com/feed/",
     },
+    "China & US-China Policy": {
+        "The Diplomat":         "https://thediplomat.com/feed/",
+        "China Digital Times":  "https://chinadigitaltimes.net/feed/",
+    },
     "General Current Events": {
         "NPR News":          "https://feeds.npr.org/1001/rss.xml",
         "BBC News":          "http://feeds.bbci.co.uk/news/rss.xml",
